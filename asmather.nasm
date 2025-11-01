@@ -16,24 +16,11 @@
 %1%+_len: equ $ - %1
 %endmacro
 
-%macro _memset 3
+%macro clearbuf 2
     lea rdi, [rel %1]
-    mov rax, %2
-    mov rcx, %3
-    cld
-    rep stosb
-%endmacro
-
-%macro _strlen 1
-    lea rdi, [rel %1]
-    xor rax, rax
-    mov rcx, %1%+_len
-    cld
-    repne scasb
-    lea rsi, [rel %1]
-    sub rdi, rsi
-    dec rdi ; exclude null term
-    mov rax, rdi ; consistency
+    xor sil, sil
+    mov rdx, %2
+    call memset
 %endmacro
 
 ; name, size, value
@@ -58,7 +45,7 @@
 
 ; name,  size
 %macro stack.reset 1
-    _memset %1, 0, STACK_MAX
+    clearbuf %1, 0, STACK_MAX
 %endmacro
 
 ; its so cursed that it breaks syntax highlighting
@@ -74,6 +61,24 @@
 %define TOKENS_MAX 2047
 
 section .text
+; === utility functions ===
+memset:
+    ; rdi: buf
+    ; rsi: ch
+    ; rdx: count
+    push rbp
+    mov rbp, rsp
+    .loop:
+        test rdx, rdx
+        jz .done
+        mov byte [rdi], sil 
+        inc rdi
+        dec rdx
+        jmp .loop
+    .done:
+    pop rbp
+    ret
+
 strlen:
     push rbp
     mov rbp, rsp
@@ -153,6 +158,204 @@ strncpy:
     mov rax, rsi
     ret
 
+strchr:
+    ; rdi: const char* s
+    ; sil: char ch
+    push rbp
+    mov rbp, rsp
+    xor r8, r8
+    mov rax, rdi
+    .loop:
+        mov dl, byte [rax]
+        test dl, dl
+        jz .end
+        cmp dl, sil
+        je .leave
+        inc rax
+        jmp .loop
+    
+    .end:
+    xor rax, rax
+    .leave:
+    pop rbp
+    ret
+
+isspace:
+    ; al: char ch
+    push rbp
+    mov rbp, rsp
+    mov sil, al
+    lea rdi, [rel isspace_spaces]
+    call strchr
+    test rax, rax
+    setz al
+    movzx rax, al
+    pop rbp
+    ret
+
+; === program functions ===
+tokenize:
+    push rbp
+    mov rbp, rsp
+    ; === OFFSET TABLE ===
+    ; -16: int i
+    ; -20: int cur_begin
+    ; -24: int tokens_begin
+    ; -28: int cur_len
+    ; -29: char cur
+    sub rsp, 32
+   
+    ; clear space
+    lea rdi, [rbp - 32]
+    call3 memset, rdi, 0, 20
+    
+    .loop:
+        ; buf: rdi
+        ; cur: rsi
+        lea rdi, [rel buf]
+        add edi, dword [rbp - 16]
+        mov sil, byte [rdi]
+        mov byte [rbp - 29], sil
+
+        ; skip whitespaces
+        .clean_ws_loop:
+            ; check if cur == 0
+            mov dil, byte [rbp - 29] 
+            test dil, dil
+            jz .clean_ws_loop_after
+            ; check if isspace(cur)
+            call1 isspace, rsi
+            test rax, rax
+            jz .clean_ws_loop_after
+            ; loop body
+            inc dword [rbp - 16] ; buf[++i]
+            lea rdi, [rel buf]
+            add edi, dword [rbp - 16]
+            mov sil, byte [rdi] ; cur = buf[++i]
+            mov byte [rbp - 29], sil
+            jmp .clean_ws_loop
+        .clean_ws_loop_after:
+        
+        ; quit if at nullterm
+        mov sil, byte [rbp - 29]
+        test sil, sil
+        jz .done
+
+        ; check if it's a symbol
+        lea rdi, [rel symbols]
+        ; sil contains our char already
+        call strchr
+        jz .handle_symbol_after
+        ; rdi: tokens
+        ; rsi: tokens_begin
+        ; rdx: cur
+        ; tokens[tokens_begin] = cur
+        lea rdi, [rel tokens]
+        mov rsi, [rbp - 24]
+        add rdi, rsi
+        mov dl, byte [rbp - 29] ; fetch cur into sil
+        mov byte [rdi], dl
+        inc rsi
+        inc rdi ; just increment the pointer too
+        mov byte [rdi], 0 ; null term
+        inc rsi ; tokens_begin++
+        inc dword [rel tokens_len]
+        inc dword [rbp - 16]
+        jmp .loop
+
+        .handle_symbol_after:
+        ; save cur_begin
+        mov edi, dword [rbp - 16]
+        mov dword [rbp - 20], edi
+        ; get the word
+        .get_word_loop:
+            mov dil, byte [rbp - 29]
+            test dil, dil
+            jz .get_word_loop_after
+            lea rdi, [rel symbols]
+            mov sil, byte [rbp - 29]
+            call strchr
+            ; jump if cur is a symbol
+            jnz .get_word_loop_after
+            mov dil, byte [rbp - 29]
+            call isspace
+            ; jump if isspace(cur)
+            jnz .get_word_loop_after
+            inc dword [rbp - 16] ; buf[++i]
+            lea rdi, [rel buf]
+            add edi, dword [rbp - 16]
+            mov sil, byte [rdi] ; cur = buf[++i]
+            mov byte [rbp - 29], sil
+        .get_word_loop_after:
+
+        ; we are now on an operator
+        ; rdi: &tokens[tokens_begin]
+        lea rdi, [rel tokens]
+        xor r8, r8
+        mov r8d, dword [rbp - 24]
+        add rdi, r8
+        ; rsi: &buf[cur_begin]
+        lea rsi, [rel buf]
+        mov r8d, dword [rbp - 20]
+        add rsi, r8
+        ; rdx: i - cur_begin
+        xor edx, edx
+        mov edx, dword [rbp - 16]
+        sub rdx, r8
+        ; copy the token
+        call strncpy
+
+        ; cur_len = i - cur_begin
+        mov edx, dword [rbp - 16]
+        sub rdx, r8
+        mov dword [rbp - 28], edx
+
+        ; delimit the current token
+        lea rdi, [rel tokens]
+        xor r8, r8
+        mov r8d, dword [rbp - 24]
+        add rdi, r8
+        mov r8d, dword [rbp - 28] ;cur_len
+        add rdi, r8 ; tokens[tokens_begin + cur_len]
+        mov byte [rdi], ','
+
+        ; begin the next token after the delim
+        inc r8d
+        mov dword [rbp - 24], r8d
+        ; inc token
+        inc dword [rel tokens_len]
+
+        mov dil, byte [rbp - 29]
+        test dil, dil
+        jz .done
+
+        ; done!
+        jmp .loop
+
+    .done:
+    xor rax, rax ; just in case
+    add rsp, 32
+    pop rbp
+    ret
+
+; 1 on failure, 0 on success
+reduce:
+    push rbp
+    mov rbp, rsp
+
+    pop rbp
+    ret
+
+; 1 on failure, 0 on success
+eval:
+    push rbp
+    mov rbp, rsp
+
+    pop rbp
+    ret
+
+extern puts
+
 global main
 main:
     push rbp
@@ -167,9 +370,9 @@ main:
 
     .mainloop:
         ; clear input buf
-        _memset buf, 0, INPUT_SIZE
+        clearbuf buf, INPUT_SIZE
         ; clear tokens
-        _memset tokens, 0, TOKENS_SIZE
+        clearbuf tokens, TOKENS_SIZE
         ; reset tokens_len
         mov dword [rel tokens_len], 0
         
@@ -192,6 +395,10 @@ main:
         lea rsi, [rel txt_exit] 
         call strcmp
         jz .done
+
+        call tokenize
+        lea rdi, [rel tokens]
+        call puts
 
         jmp .mainloop
 
@@ -217,5 +424,6 @@ declstring symbols, "+-*/^()"
 declstring prompt, "> "
 declstring txt_quit, "quit"
 declstring txt_exit, "exit"
+isspace_spaces: db 0x20, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0
 
 ; vim :filetype=nasm:

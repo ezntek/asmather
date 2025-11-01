@@ -74,10 +74,7 @@ void tokenize(void) {
             cur = buf[++i];
 
         // we are now on an operator
-        backup = buf[i];
-        buf[i] = 0;
-        strcpy(&tokens[tokens_begin], &buf[cur_begin]);
-        buf[i] = backup;
+        strncpy(&tokens[tokens_begin], &buf[cur_begin], i - cur_begin);
 
         cur_len = i - cur_begin;
         tokens[tokens_begin + cur_len] = 0; // delimit it
