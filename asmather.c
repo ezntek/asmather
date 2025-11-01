@@ -9,7 +9,7 @@
 
 // strings
 static const char SYMS[] = "+-*/()";
-static const char header[] = "Welcome to AsMather.\n"
+static const char header[] = "Welcome to AsMather. <C VERSION>\n"
                              "Copyright (c) Eason Qin, 2025. This software is "
                              "licened under the MIT license.\n"
                              "Visit the OSI website to get a copy, or refer to "
@@ -103,7 +103,7 @@ int reduce(void) {
 
     if (op <= OP_DIV) {
         if (valstack_height < 2) {
-            printf("not enough items to reduce!\n");
+            printf("not enough operands in expression!\n");
             return 1;
         }
 
@@ -217,7 +217,7 @@ int eval(void) {
                 }
             }
 
-            done:
+        done:
             binary = 0;
         } else if (isdigit(ch)) {
             if (binary) {
@@ -246,7 +246,7 @@ int eval(void) {
 
             binary = 1;
         } else {
-            printf("unknown symbol: %c\n", *cur);
+            printf("unknown word: \"%s\"\n", cur);
             return 1;
         }
 
@@ -287,9 +287,9 @@ int main(void) {
         }
 
         if (!strcmp(buf, "quit")) {
-            stop = 1;
+            break;
         } else if (!strcmp(buf, "exit")) {
-            stop = 1;
+            break;
         }
 
         tokenize();
@@ -300,7 +300,7 @@ int main(void) {
             result = POP_STACK(valstack);
             printf("%lf\n", result);
         }
-    } while (!stop);
+    } while (1);
 
     return 0;
 }
