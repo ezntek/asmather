@@ -217,3 +217,5 @@ declstring symbols, "+-*/^()"
 declstring prompt, "> "
 declstring txt_quit, "quit"
 declstring txt_exit, "exit"
+
+; vim :filetype=nasm:

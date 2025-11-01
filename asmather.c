@@ -179,7 +179,7 @@ int eval(void) {
                 } break;
                 case '(': {
                     PUSH_STACK(opstack, OP_OPAREN);
-                    bracket = 1;
+                    bracket += 1;
                 } break;
             }
 
@@ -195,7 +195,9 @@ int eval(void) {
                 }
                 POP_STACK(opstack);
 
-                bracket = 0;
+                bracket -= 1;
+                binary = 1;
+                goto inc;
             }
 
             if (opstack_height >= 2) {
@@ -209,7 +211,7 @@ int eval(void) {
                 prevprec = PRECS[op_prev];
                 if (curprec < prevprec) {
                     POP_STACK(opstack);
-                    while (opstack_height) {
+                    while (opstack_height && TOP_STACK(opstack) != OP_OPAREN) {
                         if (reduce())
                             return 1;
                     }
