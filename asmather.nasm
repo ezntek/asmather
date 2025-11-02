@@ -119,34 +119,35 @@ strcmp:
     pop rbp
     ret
 
-strncpy:
+extern strncpy
+_strncpy:
     ;; rax: char*
-    ;; rdi: int dsize 
-    ;; rsi: char* dest
-    ;; rdx: const char* src
+    ;; rdi: char* dest
+    ;; rsi: const char* src
+    ;; rdx: int dsize 
     push rbp
     mov rbp, rsp
-    ; because while (i < dsize)
-    sub rdi, 1
+    ; because while (i < rdx)
+    sub rdx, 1
 
     ; rcx: int i
     xor rcx, rcx
     .loop: 
-        ; if (i >= dsize) break;
-        cmp rcx, rdi
+        ; if (i >= rdx) break;
+        cmp rcx, rdx
         jge .loop_after
 
-        ; if (src[i] != 0x0) goto _copy_byte
-        cmp byte [rdx+rcx], 0
+        ; if (rsi[i] != 0x0) goto _copy_byte
+        cmp byte [rsi+rcx], 0
         jne .loop_copy_byte
         
         .loop_copy_null:
-        mov byte [rsi+rcx], 0
+        mov byte [rdi+rcx], 0
         jmp .loop_end
 
         .loop_copy_byte:
-        mov r8b, byte [rdx+rcx]
-        mov byte [rsi+rcx], r8b
+        mov r8b, byte [rsi+rcx]
+        mov byte [rdi+rcx], r8b
         
         .loop_end:
         ; i++
@@ -155,21 +156,20 @@ strncpy:
 
     .loop_after:
     pop rbp
-    mov rax, rsi
+    mov rax, rdi
     ret
 
-strchr:
+_strchr:
     ; rdi: const char* s
     ; sil: char ch
     push rbp
     mov rbp, rsp
-    xor r8, r8
     mov rax, rdi
     .loop:
-        mov dl, byte [rax]
-        test dl, dl
+        mov dil, byte [rax]
+        test dil, dil
         jz .end
-        cmp dl, sil
+        cmp dil, sil
         je .leave
         inc rax
         jmp .loop
@@ -180,19 +180,19 @@ strchr:
     pop rbp
     ret
 
+extern strchr
 isspace:
-    ; al: char ch
+    ; dil: char ch
     push rbp
     mov rbp, rsp
-    mov sil, al
+    mov sil, dil
     lea rdi, [rel isspace_spaces]
     call strchr
     test rax, rax
-    setz al
+    setnz al
     movzx rax, al
     pop rbp
     ret
-
 ; === program functions ===
 tokenize:
     push rbp
@@ -205,10 +205,12 @@ tokenize:
     ; -29: char cur
     sub rsp, 32
    
-    ; clear space
-    lea rdi, [rbp - 32]
-    call3 memset, rdi, 0, 20
-    
+    mov dword [rbp - 16], 0
+    mov dword [rbp - 20], 0
+    mov dword [rbp - 24], 0
+    mov dword [rbp - 28], 0
+    mov byte [rbp - 29], 0
+
     .loop:
         ; buf: rdi
         ; cur: rsi
@@ -224,7 +226,8 @@ tokenize:
             test dil, dil
             jz .clean_ws_loop_after
             ; check if isspace(cur)
-            call1 isspace, rsi
+            movzx rdi, byte [rbp - 29]
+            call isspace
             test rax, rax
             jz .clean_ws_loop_after
             ; loop body
@@ -251,14 +254,15 @@ tokenize:
         ; rdx: cur
         ; tokens[tokens_begin] = cur
         lea rdi, [rel tokens]
-        mov rsi, [rbp - 24]
-        add rdi, rsi
-        mov dl, byte [rbp - 29] ; fetch cur into sil
-        mov byte [rdi], dl
-        inc rsi
+        mov esi, dword [rbp - 24]
+        add rdi, rsi ; tokens[tokens_begin]
+        mov dl, byte [rbp - 29]
+        mov byte [rdi], dl ; *rdi = cur
+        inc esi
         inc rdi ; just increment the pointer too
-        mov byte [rdi], 0 ; null term
-        inc rsi ; tokens_begin++
+        mov byte [rdi], ',' ; null term
+        inc esi ; tokens_begin++
+        mov dword [rbp - 24], esi
         inc dword [rel tokens_len]
         inc dword [rbp - 16]
         jmp .loop
@@ -286,12 +290,12 @@ tokenize:
             add edi, dword [rbp - 16]
             mov sil, byte [rdi] ; cur = buf[++i]
             mov byte [rbp - 29], sil
+            jmp .get_word_loop
         .get_word_loop_after:
 
         ; we are now on an operator
         ; rdi: &tokens[tokens_begin]
         lea rdi, [rel tokens]
-        xor r8, r8
         mov r8d, dword [rbp - 24]
         add rdi, r8
         ; rsi: &buf[cur_begin]
@@ -306,13 +310,13 @@ tokenize:
         call strncpy
 
         ; cur_len = i - cur_begin
+        mov r8d, dword [rbp - 20]
         mov edx, dword [rbp - 16]
         sub rdx, r8
         mov dword [rbp - 28], edx
 
         ; delimit the current token
         lea rdi, [rel tokens]
-        xor r8, r8
         mov r8d, dword [rbp - 24]
         add rdi, r8
         mov r8d, dword [rbp - 28] ;cur_len
